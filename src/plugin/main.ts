@@ -30,6 +30,14 @@ export default class HighlightrPlugin extends Plugin {
       this.attachEventListeners();
     });
 
+    // Register for view changes
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", () => {
+        this.removeExistingBubbles();
+        this.attachEventListeners();
+      })
+    );
+
     this.registerEvent(
       this.app.workspace.on("editor-change", () => {
         this.cleanupNotes();
@@ -166,6 +174,9 @@ export default class HighlightrPlugin extends Plugin {
   };
 
   displayNoteBubble(note: string, event: MouseEvent) {
+    // Remove any existing bubbles first
+    this.removeExistingBubbles();
+
     const bubble = document.createElement("div");
     bubble.className = "note-bubble";
     bubble.textContent = note;
@@ -176,21 +187,38 @@ export default class HighlightrPlugin extends Plugin {
     bubble.style.border = "1px solid #aaa";
     bubble.style.padding = "5px";
     bubble.style.zIndex = "1000";
-    bubble.style.maxWidth = "300px"; // Ensure the width does not exceed 300px
-    bubble.style.height = "auto"; // Automatically adjust height to fit content
-    bubble.style.overflowWrap = "break-word"; // Ensure long words break to fit within the width
-    bubble.style.borderRadius = "8px"; // Rounded corners
+    bubble.style.maxWidth = "300px";
+    bubble.style.height = "auto";
+    bubble.style.overflowWrap = "break-word";
+    bubble.style.borderRadius = "8px";
     document.body.appendChild(bubble);
 
-    const removeBubble = () => {
-      document.body.removeChild(bubble);
-      target.removeEventListener("mouseout", removeBubble);
-      target.removeEventListener("click", removeBubble);
+    // Get the mark element (highlight)
+    const target = event.target as HTMLElement;
+    const markElement = target.tagName.toLowerCase() === "mark" ?
+      target :
+      target.previousElementSibling as HTMLElement;
+
+    const removeBubble = (e: Event) => {
+      if (bubble.parentNode) {
+        document.body.removeChild(bubble);
+        markElement.removeEventListener("mouseout", removeBubble);
+        markElement.removeEventListener("click", removeBubble);
+      }
     };
 
-    const target = event.target as HTMLElement;
-    target.addEventListener("mouseout", removeBubble);
-    target.addEventListener("click", removeBubble);
+    // Add listeners to mark element instead of bubble
+    markElement.addEventListener("mouseout", removeBubble);
+    markElement.addEventListener("click", removeBubble);
+  }
+
+  private removeExistingBubbles() {
+    const existingBubbles = document.querySelectorAll('.note-bubble');
+    existingBubbles.forEach(bubble => {
+      if (bubble.parentNode) {
+        bubble.parentNode.removeChild(bubble);
+      }
+    });
   }
 
   attachEventListeners() {
@@ -211,18 +239,14 @@ export default class HighlightrPlugin extends Plugin {
   }
 
   private attachMouseEvents(container: Element) {
-    container.addEventListener("mouseover", (event) => {
+    const handleMouseOver = (event: Event) => {
       const target = event.target as HTMLElement;
-
-      // Handle mark elements with notes
       if (target.tagName.toLowerCase() === "mark" && target.hasAttribute("data-note")) {
         const note = target.getAttribute("data-note");
         if (note && event instanceof MouseEvent) {
           this.displayNoteBubble(note, event);
         }
-      }
-      // Handle note icons
-      else if (target.classList.contains("note-icon")) {
+      } else if (target.classList.contains("note-icon")) {
         const prevElement = target.previousElementSibling;
         if (prevElement?.tagName.toLowerCase() === "mark" && prevElement.hasAttribute("data-note")) {
           const note = prevElement.getAttribute("data-note");
@@ -231,7 +255,11 @@ export default class HighlightrPlugin extends Plugin {
           }
         }
       }
-    });
+    };
+
+    // Clean up and reattach
+    container.removeEventListener("mouseover", handleMouseOver);
+    container.addEventListener("mouseover", handleMouseOver);
   }
 
   cleanupNotes() {
@@ -244,11 +272,21 @@ export default class HighlightrPlugin extends Plugin {
 
       const cursorPos = view.editor.getCursor();
 
-      // Single regex to handle cleanup and icon addition
-      const cleanContent = content.replace(
+      // First clean up marks without data-note
+      let cleanContent = content.replace(
+        /<mark(?![^>]*data-note)[^>]*>.*?<\/mark>(?:\s*<span class="note-icon">:LiStickyNote:<\/span>)?/g,
+        (match) => {
+          return match.replace(/<span class="note-icon">:LiStickyNote:<\/span>/g, '');
+        }
+      );
+
+      // Then handle marks with data-note
+      cleanContent = cleanContent.replace(
         /<mark.*?data-note="(.*?)".*?>.*?<\/mark>(?:<span class="note-icon">:LiStickyNote:<\/span>)?/g,
         (match, note) => {
-          if (!note) return match;
+          if (!note) {
+            return match.replace(/<span class="note-icon">:LiStickyNote:<\/span>/g, '');
+          }
           return match.replace(/:LiStickyNote:/g, '')
             .replace(/<span class="note-icon">.*?<\/span>/g, '')
             + '<span class="note-icon">:LiStickyNote:</span>';
