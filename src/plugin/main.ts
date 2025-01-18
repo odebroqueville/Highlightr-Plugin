@@ -1,4 +1,4 @@
-import { Editor, Menu, Plugin, PluginManifest } from "obsidian";
+import { Editor, Menu, Plugin, PluginManifest, MarkdownView } from "obsidian";
 import { wait } from "src/utils/util";
 import addIcons from "src/icons/customIcons";
 import { HighlightrSettingTab } from "../settings/settingsTab";
@@ -7,6 +7,7 @@ import DEFAULT_SETTINGS from "../settings/settingsData";
 import contextMenu from "src/plugin/contextMenu";
 import highlighterMenu from "src/ui/highlighterMenu";
 import { createHighlighterIcons } from "src/icons/customIcons";
+import { NoteModal } from "src/ui/NoteModal";
 
 import { createStyles } from "src/utils/createStyles";
 import { EnhancedApp, EnhancedEditor } from "src/settings/types";
@@ -26,32 +27,33 @@ export default class HighlightrPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       this.reloadStyles(this.settings);
       createHighlighterIcons(this.settings, this);
+      this.attachEventListeners();
     });
 
     this.registerEvent(
-      this.app.workspace.on("editor-menu", this.handleHighlighterInContextMenu)
+      this.app.workspace.on("editor-change", () => {
+        this.cleanupNotes();
+      })
     );
+  }
 
-    this.addSettingTab(new HighlightrSettingTab(this.app, this));
+  onunload() {
+    console.log("Highlightr unloaded");
+  }
 
-    this.addCommand({
-      id: "highlighter-plugin-menu",
-      name: "Open Highlightr",
-      icon: "highlightr-pen",
-      editorCallback: (editor: EnhancedEditor) => {
-        !document.querySelector(".menu.highlighterContainer")
-          ? highlighterMenu(this.app, this.settings, editor)
-          : true;
-      },
-    });
+  handleHighlighterInContextMenu = (
+    menu: Menu,
+    editor: EnhancedEditor
+  ): void => {
+    contextMenu(this.app, menu, editor, this, this.settings);
+  };
 
-    addEventListener("Highlightr-NewCommand", () => {
-      this.reloadStyles(this.settings);
-      this.generateCommands(this.editor);
-      createHighlighterIcons(this.settings, this);
-    });
-    this.generateCommands(this.editor);
-    this.refresh();
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
   }
 
   reloadStyles(settings: HighlightrSettings) {
@@ -76,55 +78,19 @@ export default class HighlightrPlugin extends Plugin {
 
   generateCommands(editor: Editor) {
     this.settings.highlighterOrder.forEach((highlighterKey: string) => {
-      const applyCommand = (command: CommandPlot, editor: Editor) => {
+      const applyCommand = (command: CommandPlot, editor: Editor, note: string) => {
         const selectedText = editor.getSelection();
-        const curserStart = editor.getCursor("from");
-        const curserEnd = editor.getCursor("to");
-        const prefix = command.prefix;
-        const suffix = command.suffix || prefix;
-        const setCursor = (mode: number) => {
-          editor.setCursor(
-            curserStart.line + command.line * mode,
-            curserEnd.ch + cursorPos * mode
-          );
-        };
-        const cursorPos =
-          selectedText.length > 0
-            ? prefix.length + suffix.length + 1
-            : prefix.length;
-        const preStart = {
-          line: curserStart.line - command.line,
-          ch: curserStart.ch - prefix.length,
-        };
-        const pre = editor.getRange(preStart, curserStart);
+        const noteAttribute = note ? ` data-note="${note}"` : "";
+        const prefix =
+          this.settings.highlighterMethods === "css-classes"
+            ? `<mark class="hltr-${highlighterKey.toLowerCase()}"${noteAttribute}>`
+            : `<mark style="background: ${this.settings.highlighters[highlighterKey]};"${noteAttribute}>`;
+        const suffix = "</mark>";
 
-        const sufEnd = {
-          line: curserStart.line + command.line,
-          ch: curserEnd.ch + suffix.length,
-        };
-
-        const suf = editor.getRange(curserEnd, sufEnd);
-
-        const preLast = pre.slice(-1);
-        const prefixLast = prefix.trimStart().slice(-1);
-        const sufFirst = suf[0];
-
-        if (suf === suffix.trimEnd()) {
-          if (preLast === prefixLast && selectedText) {
-            editor.replaceRange(selectedText, preStart, sufEnd);
-            const changeCursor = (mode: number) => {
-              editor.setCursor(
-                curserStart.line + command.line * mode,
-                curserEnd.ch + (cursorPos * mode + 8)
-              );
-            };
-            return changeCursor(-1);
-          }
-        }
-
-        editor.replaceSelection(`${prefix}${selectedText}${suffix}`);
-
-        return setCursor(1);
+        console.log("Applying highlight with note:", note); // Debugging log
+        const noteIcon = note ? `<span class="note-icon">:LiStickyNote:</span>` : "";
+        editor.replaceSelection(`${prefix}${selectedText}${suffix}${noteIcon}`);
+        editor.setCursor(editor.getCursor("to"));
       };
 
       type CommandPlot = {
@@ -157,9 +123,9 @@ export default class HighlightrPlugin extends Plugin {
           name: highlighterKey,
           icon: highlighterpen,
           editorCallback: async (editor: Editor) => {
-            applyCommand(commandsMap[type], editor);
-            await wait(10);
-            editor.focus();
+            new NoteModal(this.app, (note) => {
+              applyCommand(commandsMap[type], editor, note);
+            }).open();
           },
         });
       });
@@ -199,22 +165,102 @@ export default class HighlightrPlugin extends Plugin {
     );
   };
 
-  onunload() {
-    console.log("Highlightr unloaded");
+  displayNoteBubble(note: string, event: MouseEvent) {
+    const bubble = document.createElement("div");
+    bubble.className = "note-bubble";
+    bubble.textContent = note;
+    bubble.style.position = "absolute";
+    bubble.style.left = `${event.pageX}px`;
+    bubble.style.top = `${event.pageY}px`;
+    bubble.style.backgroundColor = "#ccc";
+    bubble.style.border = "1px solid #aaa";
+    bubble.style.padding = "5px";
+    bubble.style.zIndex = "1000";
+    bubble.style.maxWidth = "300px"; // Ensure the width does not exceed 300px
+    bubble.style.height = "auto"; // Automatically adjust height to fit content
+    bubble.style.overflowWrap = "break-word"; // Ensure long words break to fit within the width
+    bubble.style.borderRadius = "8px"; // Rounded corners
+    document.body.appendChild(bubble);
+
+    const removeBubble = () => {
+      document.body.removeChild(bubble);
+      target.removeEventListener("mouseout", removeBubble);
+      target.removeEventListener("click", removeBubble);
+    };
+
+    const target = event.target as HTMLElement;
+    target.addEventListener("mouseout", removeBubble);
+    target.addEventListener("click", removeBubble);
   }
 
-  handleHighlighterInContextMenu = (
-    menu: Menu,
-    editor: EnhancedEditor
-  ): void => {
-    contextMenu(this.app, menu, editor, this, this.settings);
-  };
+  attachEventListeners() {
+    // Handle editing mode
+    const editorContainers = document.querySelectorAll('.cm-html-embed');
+    editorContainers.forEach((editorContainer) => {
+      this.attachMouseEvents(editorContainer);
+    });
 
-  async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Handle reading mode
+    const readingViews = document.querySelectorAll('.markdown-preview-view');
+    readingViews.forEach((readingView) => {
+      this.attachMouseEvents(readingView);
+    });
+
+    // Clean up any duplicate text nodes
+    this.cleanupNotes();
   }
 
-  async saveSettings() {
-    await this.saveData(this.settings);
+  private attachMouseEvents(container: Element) {
+    container.addEventListener("mouseover", (event) => {
+      const target = event.target as HTMLElement;
+
+      // Handle mark elements with notes
+      if (target.tagName.toLowerCase() === "mark" && target.hasAttribute("data-note")) {
+        const note = target.getAttribute("data-note");
+        if (note && event instanceof MouseEvent) {
+          this.displayNoteBubble(note, event);
+        }
+      }
+      // Handle note icons
+      else if (target.classList.contains("note-icon")) {
+        const prevElement = target.previousElementSibling;
+        if (prevElement?.tagName.toLowerCase() === "mark" && prevElement.hasAttribute("data-note")) {
+          const note = prevElement.getAttribute("data-note");
+          if (note && event instanceof MouseEvent) {
+            this.displayNoteBubble(note, event);
+          }
+        }
+      }
+    });
+  }
+
+  cleanupNotes() {
+    try {
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view?.editor) return;
+
+      const content = view.editor.getValue();
+      if (!content) return;
+
+      const cursorPos = view.editor.getCursor();
+
+      // Single regex to handle cleanup and icon addition
+      const cleanContent = content.replace(
+        /<mark.*?data-note="(.*?)".*?>.*?<\/mark>(?:<span class="note-icon">:LiStickyNote:<\/span>)?/g,
+        (match, note) => {
+          if (!note) return match;
+          return match.replace(/:LiStickyNote:/g, '')
+            .replace(/<span class="note-icon">.*?<\/span>/g, '')
+            + '<span class="note-icon">:LiStickyNote:</span>';
+        }
+      );
+
+      if (content !== cleanContent) {
+        view.editor.setValue(cleanContent);
+        view.editor.setCursor(cursorPos);
+      }
+    } catch (error) {
+      console.error('Error in cleanupNotes:', error);
+    }
   }
 }
