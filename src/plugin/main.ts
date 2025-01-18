@@ -1,4 +1,4 @@
-import { Editor, Menu, Plugin, PluginManifest, MarkdownView } from "obsidian";
+import { Editor, Menu, Plugin, PluginManifest, MarkdownView, setIcon } from "obsidian";
 import { wait } from "src/utils/util";
 import addIcons from "src/icons/customIcons";
 import { HighlightrSettingTab } from "../settings/settingsTab";
@@ -95,8 +95,14 @@ export default class HighlightrPlugin extends Plugin {
             : `<mark style="background: ${this.settings.highlighters[highlighterKey]};"${noteAttribute}>`;
         const suffix = "</mark>";
 
-        console.log("Applying highlight with note:", note); // Debugging log
-        const noteIcon = note ? `<span class="note-icon">:LiStickyNote:</span>` : "";
+        console.log("Applying highlight with note:", note);
+
+        // Create span element for icon
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'note-icon';
+        setIcon(iconSpan, 'sticky-note');
+        const noteIcon = note ? `<span class="note-icon">${iconSpan.innerHTML}</span>` : "";
+
         editor.replaceSelection(`${prefix}${selectedText}${suffix}${noteIcon}`);
         editor.setCursor(editor.getCursor("to"));
       };
@@ -272,24 +278,20 @@ export default class HighlightrPlugin extends Plugin {
 
       const cursorPos = view.editor.getCursor();
 
-      // First clean up marks without data-note
-      let cleanContent = content.replace(
-        /<mark(?![^>]*data-note)[^>]*>.*?<\/mark>(?:\s*<span class="note-icon">:LiStickyNote:<\/span>)?/g,
-        (match) => {
-          return match.replace(/<span class="note-icon">:LiStickyNote:<\/span>/g, '');
-        }
-      );
+      // Create icon once
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'note-icon';
+      setIcon(iconSpan, 'sticky-note');
+      const noteIconHtml = `<span class="note-icon">${iconSpan.innerHTML}</span>`;
 
-      // Then handle marks with data-note
-      cleanContent = cleanContent.replace(
-        /<mark.*?data-note="(.*?)".*?>.*?<\/mark>(?:<span class="note-icon">:LiStickyNote:<\/span>)?/g,
-        (match, note) => {
-          if (!note) {
-            return match.replace(/<span class="note-icon">:LiStickyNote:<\/span>/g, '');
-          }
-          return match.replace(/:LiStickyNote:/g, '')
-            .replace(/<span class="note-icon">.*?<\/span>/g, '')
-            + '<span class="note-icon">:LiStickyNote:</span>';
+      // Single pass replacement with better patterns
+      const cleanContent = content.replace(
+        /<mark((?![^>]*data-note)[^>]*|.*?data-note="([^"]*)".*?)>([^<]*)<\/mark>(?:\s*<span class="note-icon">.*?<\/span>)*/g,
+        (match, attrs, note, text) => {
+          // Remove any existing note icons
+          const cleanMatch = match.replace(/<span class="note-icon">.*?<\/span>/g, '');
+          // Only add icon if there's a note
+          return note ? cleanMatch + noteIconHtml : cleanMatch;
         }
       );
 
