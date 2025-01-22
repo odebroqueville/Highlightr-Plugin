@@ -1,4 +1,4 @@
-import { Editor, Menu, Plugin, PluginManifest, MarkdownView, setIcon, TFile } from "obsidian";
+import { Editor, Menu, Plugin, PluginManifest, MarkdownView, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { wait } from "src/utils/util";
 import addIcons from "src/icons/customIcons";
 import { HighlightrSettingTab } from "../settings/settingsTab";
@@ -11,6 +11,7 @@ import { NoteModal } from "src/ui/NoteModal";
 import { ConfirmationModal } from "src/ui/ConfirmationModal";
 import { createStyles } from "src/utils/createStyles";
 import { EnhancedApp, EnhancedEditor } from "src/settings/types";
+import { NotesTab, NOTES_VIEW_TYPE } from "../ui/NotesTab";
 
 export default class HighlightrPlugin extends Plugin {
     app: EnhancedApp;
@@ -28,6 +29,7 @@ export default class HighlightrPlugin extends Plugin {
             this.reloadStyles(this.settings);
             createHighlighterIcons(this.settings, this);
             this.attachEventListeners();
+            this.openNotesTab();
         });
 
         // Register for view changes
@@ -130,11 +132,18 @@ export default class HighlightrPlugin extends Plugin {
         this.registerEvent(
             this.app.workspace.on("editor-change", () => {
                 this.cleanupNotes();
+                this.triggerNotesTabUpdate();
             })
         );
 
         // Generate commands for different highlighter colors
         this.generateCommands(this.editor);
+
+        // Register NotesTab view type
+        this.registerView(
+            NOTES_VIEW_TYPE,
+            (leaf: WorkspaceLeaf) => new NotesTab(leaf, this)
+        );
     }
 
     onunload() {
@@ -393,6 +402,52 @@ export default class HighlightrPlugin extends Plugin {
             }
         } catch (error) {
             console.error('Error in cleanupNotes:', error);
+        }
+    }
+
+    private async openNotesTab(): Promise<void> {
+        try {
+            // Check if the view is already open
+            const existingLeaves = this.app.workspace.getLeavesOfType(NOTES_VIEW_TYPE);
+            if (existingLeaves.length > 0) {
+                this.app.workspace.revealLeaf(existingLeaves[0]);
+                return;
+            }
+
+            // Activate right sidebar
+            const rightSidebar = this.app.workspace.getRightLeaf(false);
+
+            if (rightSidebar) {
+                await rightSidebar.setViewState({
+                    type: NOTES_VIEW_TYPE,
+                    active: true
+                });
+                this.app.workspace.revealLeaf(rightSidebar);
+            } else {
+                // Fallback: create a new leaf
+                const leaf = this.app.workspace.getLeaf(true);
+                await leaf.setViewState({
+                    type: NOTES_VIEW_TYPE,
+                    active: true
+                });
+                this.app.workspace.revealLeaf(leaf);
+            }
+        } catch (error) {
+            console.error("Error opening NotesTab:", error);
+        }
+    }
+
+    private triggerNotesTabUpdate(): void {
+        try {
+            const notesLeaves = this.app.workspace.getLeavesOfType(NOTES_VIEW_TYPE);
+            notesLeaves.forEach(leaf => {
+                const view = leaf.view;
+                if (view instanceof NotesTab) {
+                    view.forceUpdate();
+                }
+            });
+        } catch (error) {
+            console.error("Error triggering NotesTab update:", error);
         }
     }
 }

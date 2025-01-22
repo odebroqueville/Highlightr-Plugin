@@ -825,3 +825,28 @@ PICKR 1.8.2 MIT | https://github.com/Simonwep/pickr
   border-radius: 8px;
   /* Rounded corners */
 }
+
+.highlightr-notes-container {
+  order: -1;
+  margin-top: 0;
+  padding-top: 1em;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.highlight-item {
+  margin: 1em 0;
+  padding: 0.5em;
+  border-left: 3px solid var(--interactive-accent);
+}
+
+.highlight-text {
+  font-size: 0.95em;
+  margin-bottom: 0.5em;
+}
+
+.highlight-note {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  padding-left: 1em;
+  border-left: 2px solid var(--background-modifier-border);
+}
