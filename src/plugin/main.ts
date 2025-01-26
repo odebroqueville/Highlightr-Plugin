@@ -50,9 +50,9 @@ export default class HighlightrPlugin extends Plugin {
                 if (!view) return;
 
                 const content = view.editor.getValue();
-                // Regex to match entire <mark> tags with their full content and styles
-                const highlightRegex = /<mark[^>]*>(.*?)<\/mark>/g;
-                const highlightsAndNotes: Array<{ fullMarkTag: string, note: string }> = [];
+                // Updated regex to match both mark tags and custom tags with style, note and tags attributes
+                const highlightRegex = /<(?:mark|@@)[^>]*(?:style="background-color:[^;]+;)(?:\s*data-note="[^"]*")?(?:\s*data-tags="[^"]*")?[^>]*>.*?<\/(?:mark|@@)>/g;
+                const highlightsAndNotes: Array<{ fullMarkTag: string, note: string, tags: string[] }> = [];
 
                 let match;
                 while ((match = highlightRegex.exec(content)) !== null) {
@@ -63,19 +63,31 @@ export default class HighlightrPlugin extends Plugin {
                     const noteMatch = fullMarkTag.match(/data-note="([^"]*)"/);
                     const note = noteMatch ? noteMatch[1] : '';
 
-                    // Remove data-note attribute from the mark tag
-                    const cleanMarkTag = fullMarkTag.replace(/\s*data-note="[^"]*"/, '');
+                    // Extract tags from data-tags attribute if it exists and process them
+                    const tagsMatch = fullMarkTag.match(/data-tags="([^"]*)"/);
+                    const tags = tagsMatch
+                        ? tagsMatch[1]
+                            .split(',')
+                            .map(tag => '#' + tag.trim().replace(/\s+/g, '-'))
+                        : [];
+
+                    // Remove data-note and data-tags attributes from the mark tag
+                    const cleanMarkTag = fullMarkTag
+                        .replace(/\s*data-note="[^"]*"/, '')
+                        .replace(/\s*data-tags="[^"]*"/, '');
 
                     highlightsAndNotes.push({
                         fullMarkTag: cleanMarkTag,
-                        note: note
+                        note: note,
+                        tags: tags
                     });
                 }
 
-                // Create a new markdown tab with highlights and notes
-                const highlightsMarkdown = highlightsAndNotes.map((item, index) =>
-                    `${index + 1}. ${item.fullMarkTag}\n   ${item.note ? `- ${item.note}` : ''}`
-                ).join('\n\n');
+                // Create a new markdown tab with highlights, notes and tags
+                const highlightsMarkdown = highlightsAndNotes.map((item, index) => {
+                    const tagsList = item.tags.length > 0 ? `\nTags: ${item.tags.join(', ')}` : '';
+                    return `${item.fullMarkTag}${item.note ? `\nNote: ${item.note}` : ''}${tagsList}\n`;
+                }).join('\n---\n');
 
                 // Check if file already exists
                 const existingFile = this.app.vault.getAbstractFileByPath(`${view.file.parent.path}/Highlights from ${view.file.name}`);
@@ -187,16 +199,18 @@ export default class HighlightrPlugin extends Plugin {
 
     generateCommands(editor: Editor) {
         this.settings.highlighterOrder.forEach((highlighterKey: string) => {
-            const applyCommand = (command: CommandPlot, editor: Editor, note: string) => {
+            const applyCommand = (command: CommandPlot, editor: Editor, note: string, tags: string[] = []) => {
                 const selectedText = editor.getSelection();
                 const noteAttribute = note ? ` data-note="${note}"` : "";
+                const tagsAttribute = tags.length > 0 ? ` data-tags="${tags.join(',')}"` : "";
+
                 const prefix =
                     this.settings.highlighterMethods === "css-classes"
-                        ? `<mark class="hltr-${highlighterKey.toLowerCase()}"${noteAttribute}>`
-                        : `<mark style="background: ${this.settings.highlighters[highlighterKey]};"${noteAttribute}>`;
+                        ? `<mark class="hltr-${highlighterKey.toLowerCase()}"${noteAttribute}${tagsAttribute}>`
+                        : `<mark style="background: ${this.settings.highlighters[highlighterKey]};"${noteAttribute}${tagsAttribute}>`;
                 const suffix = "</mark>";
 
-                console.log("Applying highlight with note:", note);
+                console.log("Applying highlight with note:", note, "and tags:", tags);
 
                 // Create span element for icon
                 const iconSpan = document.createElement('span');

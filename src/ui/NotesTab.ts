@@ -28,50 +28,75 @@ export class NotesTab extends ItemView {
             console.log("Starting updateNotesList");
             container.empty();
 
-            const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-            if (!activeView?.file) {
-                console.log("No active file");
+            // Get all markdown leaves
+            const markdownLeaves = this.app.workspace.getLeavesOfType("markdown");
+            console.log("Markdown leaves found:", markdownLeaves.length);
+
+            if (markdownLeaves.length === 0) {
+                container.createEl('div', {
+                    cls: 'highlightr-message',
+                    text: 'No markdown files open'
+                });
                 return;
             }
 
-            console.log("Active file:", activeView.file.path);
-            const content = await this.app.vault.read(activeView.file);
-            console.log("File content loaded:", content.length);
+            // Process each markdown leaf
+            for (const leaf of markdownLeaves) {
+                const view = leaf.view;
+                if (view instanceof MarkdownView && view.file) {
+                    console.log("Processing file:", view.file.path);
+                    const content = await this.app.vault.read(view.file);
+                    console.log("File content loaded:", content.length);
 
-            // Separate regexes for matching
-            const noteRegex = /data-note="([^"]*)"/;
-            const colorRegex = /background(?:-color)?:\s*((?:rgb\([^)]+\)|#[A-Fa-f0-9]+))/;
-            const highlightRegex = /<mark[^>]*>(.*?)<\/mark>/g;
+                    // Separate regexes for matching
+                    const noteRegex = /data-note="([^"]*)"/;
+                    const tagsRegex = /data-tags="([^"]*)"/;
+                    const colorRegex = /background(?:-color)?:\s*((?:rgb\([^)]+\)|#[A-Fa-f0-9]+))/;
+                    const highlightRegex = /<mark[^>]*>(.*?)<\/mark>/g;
 
-            const highlights: Array<{ text: string; note: string | null; color: string | null }> = [];
+                    const highlights: Array<{ text: string; note: string | null; color: string | null; tags: string[] }> = [];
 
-            let match;
-            while ((match = highlightRegex.exec(content)) !== null) {
-                const fullMatch = match[0];
-                console.log("Processing mark:", fullMatch);
+                    let match;
+                    while ((match = highlightRegex.exec(content)) !== null) {
+                        const fullMatch = match[0];
+                        const text = match[1];
+                        console.log("Processing mark:", fullMatch);
 
-                // Extract note
-                const noteMatch = fullMatch.match(noteRegex);
-                const note = noteMatch ? noteMatch[1] : null;
-                console.log("Found note:", note);
+                        // Extract note
+                        const noteMatch = fullMatch.match(noteRegex);
+                        const note = noteMatch ? noteMatch[1] : null;
+                        console.log("Found note:", note);
 
-                // Extract color
-                const colorMatch = fullMatch.match(colorRegex);
-                const color = colorMatch ? colorMatch[1] : null;
-                console.log("Found color:", color);
+                        // Extract tags
+                        const tagsMatch = fullMatch.match(tagsRegex);
+                        const tags = tagsMatch ? tagsMatch[1].split(',').map(tag => `#${tag.trim().replace(/\s+/g, '-')}`) : [];
+                        console.log("Found tags:", tags);
 
-                // Extract text
-                const text = match[1];
-                console.log("Found text:", text);
+                        // Extract color
+                        const colorMatch = fullMatch.match(colorRegex);
+                        const color = colorMatch ? colorMatch[1] : null;
+                        console.log("Found color:", color);
 
-                highlights.push({ text, note, color });
-                console.log("Added highlight:", { text, note: note || "no note", color: color || "no color" });
+                        highlights.push({ text, note, color, tags });
+                    }
+
+                    this.displayHighlights(container, highlights);
+                    return; // Process only the first valid markdown file
+                }
             }
 
-            this.displayHighlights(container, highlights);
+            // If no valid markdown file is found
+            container.createEl('div', {
+                cls: 'highlightr-message',
+                text: 'No valid markdown files found'
+            });
 
         } catch (error) {
             console.error("Error in updateNotesList:", error);
+            container.createEl('div', {
+                cls: 'highlightr-error',
+                text: 'Error processing markdown content'
+            });
         }
     }
 
@@ -126,7 +151,7 @@ export class NotesTab extends ItemView {
     }
 
     // Update display method
-    private displayHighlights(container: HTMLDivElement, highlights: Array<{ text: string; note: string | null; color: string | null }>): void {
+    private displayHighlights(container: HTMLDivElement, highlights: Array<{ text: string; note: string | null; color: string | null; tags: string[] }>): void {
         if (highlights.length === 0) {
             container.createDiv({ text: "No highlights found" });
             return;
@@ -135,7 +160,7 @@ export class NotesTab extends ItemView {
         const formattedContent = container.createDiv({ cls: "highlightr-formatted-content" });
         formattedContent.createEl("h3", { text: "Highlights & Notes" });
 
-        highlights.forEach(({ text, note, color }) => {
+        highlights.forEach(({ text, note, color, tags }) => {
             const highlightEl = formattedContent.createDiv({ cls: "highlight-item" });
             const textEl = highlightEl.createDiv({ cls: "highlight-text" });
 
@@ -148,7 +173,14 @@ export class NotesTab extends ItemView {
             if (note) {
                 highlightEl.createDiv({
                     cls: "highlight-note",
-                    text: note
+                    text: `Note: ${note}`
+                });
+            }
+
+            if (tags.length > 0) {
+                highlightEl.createDiv({
+                    cls: "highlight-tags",
+                    text: `Tags: ${tags.join(', ')}`
                 });
             }
         });
