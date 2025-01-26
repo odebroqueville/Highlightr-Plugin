@@ -69,7 +69,7 @@ export class NotesTab extends ItemView {
 
                         // Extract tags
                         const tagsMatch = fullMatch.match(tagsRegex);
-                        const tags = tagsMatch ? tagsMatch[1].split(',').map(tag => `#${tag.trim().replace(/\s+/g, '-')}`) : [];
+                        const tags = tagsMatch ? tagsMatch[1].split(',').map(tag => tag.trim()) : [];
                         console.log("Found tags:", tags);
 
                         // Extract color
@@ -178,9 +178,15 @@ export class NotesTab extends ItemView {
             }
 
             if (tags.length > 0) {
-                highlightEl.createDiv({
+                const tagsContainer = highlightEl.createDiv({
                     cls: "highlight-tags",
-                    text: `Tags: ${tags.join(', ')}`
+                    text: "Tags: "
+                });
+                tags.forEach(tag => {
+                    tagsContainer.createDiv({
+                        cls: "highlight-tag",
+                        text: tag
+                    });
                 });
             }
         });

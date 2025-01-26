@@ -834,19 +834,43 @@ PICKR 1.8.2 MIT | https://github.com/Simonwep/pickr
 }
 
 .highlight-item {
-  margin: 1em 0;
-  padding: 0.5em;
-  border-left: 3px solid var(--interactive-accent);
+  margin: 10px;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  background-color: #f9f9f9;
 }
 
 .highlight-text {
-  font-size: 0.95em;
-  margin-bottom: 0.5em;
+  margin-bottom: 8px;
+  display: inline;
+  /* Ensure highlight fits text */
+  padding: 2px 4px;
+  /* Adjust padding for better fit */
+  border-radius: 3px;
+  /* Optional: round corners */
 }
 
 .highlight-note {
-  font-size: 0.85em;
+  font-size: 0.9em;
   color: var(--text-muted);
+  margin-top: 5px;
   padding-left: 1em;
-  border-left: 2px solid var(--background-modifier-border);
+}
+
+.highlight-tags {
+  font-size: 0.9em;
+  display: flex;
+  flex-wrap: wrap;
+  padding-left: 1em;
+  align-items: baseline;
+}
+
+.highlight-tag {
+  background-color: #00614a;
+  border-radius: 10px;
+  padding: 2px 5px;
+  margin: 2px;
+  font-size: 0.85em;
+  color: #e6e6e6;
 }
