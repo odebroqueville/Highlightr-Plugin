@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, MarkdownView, Editor } from "obsidian";
+import { ItemView, WorkspaceLeaf, MarkdownView } from "obsidian";
 import HighlightrPlugin from "../plugin/main";
 
 export const NOTES_VIEW_TYPE = "highlightr-notes-view";
@@ -69,7 +69,7 @@ export class NotesTab extends ItemView {
 
                         // Extract tags
                         const tagsMatch = fullMatch.match(tagsRegex);
-                        const tags = tagsMatch ? tagsMatch[1].split(',').map(tag => tag.trim()) : [];
+                        const tags = tagsMatch ? tagsMatch[1].split(',').map(tag => `#${tag.trim().replace(/\s+/g, '-')}`) : [];
                         console.log("Found tags:", tags);
 
                         // Extract color
@@ -144,7 +144,7 @@ export class NotesTab extends ItemView {
         } catch (error) {
             console.error("Error in onOpen:", error);
             this.containerEl.createDiv({
-                text: "Failed to load Highlightr Notes",
+                text: "Failed to load Highlights & Notes side view",
                 cls: "highlightr-error-message"
             });
         }
