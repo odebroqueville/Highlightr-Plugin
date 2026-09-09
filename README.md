@@ -57,6 +57,62 @@ This plugin is available in the Obsidian community plugin store. You can install
 
 ---
 
+## New features in this build
+
+### Word-style floating color toolbar
+
+Once you select text with the mouse in **editing mode** (source / live preview) **or
+reading mode**, a small floating toolbar appears near the selection so you can highlight
+right away — no right-click needed:
+
+- **Color dots** apply the selected highlighter to the selection.
+- Selecting text that is already part of a highlight lets you **re-color the whole
+  highlight** instead of creating a nested one.
+- The **eraser** removes the highlight of the selected text.
+- The **note** button opens the annotation (note / tags) dialog.
+- The **style** button opens a small menu to switch the highlight style
+  (`none` / `lowlight` / `floating` / `rounded` / `realistic`) — it is applied globally
+  and saved immediately, and the toolbar stays open so you can still pick a color.
+
+The toolbar closes when you click elsewhere, scroll, press `Esc`, type over the
+selection, or clear it. It also appears after keyboard selections (`Shift` + arrow keys).
+The color dots preview the color at full opacity (the stored alpha is only applied to
+the highlight on the page).
+
+### Bilingual interface (English / 中文)
+
+The settings tab has a **中文 / English** button that switches the whole plugin UI
+(settings page, context menu, floating toolbar, annotation dialog and the sidebar) between
+English and Chinese. The choice is persisted and the page refreshes immediately.
+Highlighter color names (Pink, Red, …) are intentionally not translated.
+
+### Immediate rendering in Live Preview
+
+Obsidian renders inline `<mark>` tags lazily, so a highlight could appear as raw text
+until the caret moved away. This build **parks the caret outside the highlighted block
+for a moment after applying the highlight** so the Live Preview renders it immediately,
+then brings the caret back.
+
+### Richer default colors
+
+The built-in palette is now saved at **90% opacity** (instead of 65%) for a more visible
+highlight; individual colors can still be customized in the settings.
+
+### Highlights & Notes sidebar
+
+The right-side panel gained richer interaction on each record:
+
+- **Left-click** selects the record (highlighted in the list).
+- **Double-click** jumps the editor caret to the corresponding highlight in the note.
+- **Right-click → Delete highlight** unwraps the `<mark>` in the note (highlight and any
+  annotation removed, surrounding text kept) and refreshes the panel.
+- Pressing **`Delete` / `Backspace`** on a selected record deletes it too.
+
+Multi-line highlight blocks (e.g. a highlighted list) are now captured correctly by the
+sidebar.
+
+---
+
 ## Checklist
 
 - [x] Highlighter color commands

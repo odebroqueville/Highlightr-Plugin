@@ -5,15 +5,27 @@ import addIcons from "../icons/customIcons";
 import { HighlightrSettingTab } from "../settings/settingsTab";
 import { HighlightrSettings, createDefaultHighlighterClass } from "../settings/settingsData";
 import DEFAULT_SETTINGS from "../settings/settingsData";
+import { setLanguage, t } from "../i18n";
+import { getAttribute } from "../utils/markup";
 import contextMenu from "./contextMenu";
 import { createHighlighterIcons, getHighlighterPenIconId } from "../icons/customIcons";
 import { createStyles } from "../utils/createStyles";
 import { EnhancedApp, EnhancedEditor } from "../settings/types";
 import { NotesTab, NOTES_VIEW_TYPE } from "../ui/NotesTab";
+import { SelectionToolbar } from "../ui/selectionToolbar";
+import {
+  applyHighlightToMark,
+  applyHighlightToSelection,
+  annotateExistingMark,
+  annotatePlainSelection,
+  eraseHighlightRange,
+  resolveSelectionState,
+  SelectionState,
+} from "./highlightActions";
 
 const showHighlightrMenuFromCommand = (plugin: HighlightrPlugin, editor: EnhancedEditor): void => {
     if (!editor || !editor.hasFocus()) {
-        new Notice("Focus must be in editor");
+        new Notice(t("notice.focusInEditor"));
         return;
     }
 
@@ -53,6 +65,19 @@ export default class HighlightrPlugin extends Plugin {
     private isRefreshingPreviewAfterOpen: boolean = false;
     private activeMarkdownFilePath: string | null = null;
     private readonly markRegex = /<mark\b[^>]*>[\s\S]*?<\/mark>/g;
+
+    private toolbar: SelectionToolbar | null = null;
+    private editorToolbarState: {
+        view: MarkdownView;
+        editor: EnhancedEditor;
+        state: SelectionState;
+    } | null = null;
+    private readingToolbarState: {
+        view: MarkdownView;
+        selectionText: string;
+        markEl: HTMLElement | null;
+        approxOffset: number;
+    } | null = null;
 
     private getActiveDocument(): Document {
         return this.app.workspace.activeDocument ?? activeDocument;
@@ -357,6 +382,8 @@ export default class HighlightrPlugin extends Plugin {
             addIcons();
 
             await this.loadSettings();
+            setLanguage(this.settings.highlighterLanguage);
+            this.initializeSelectionToolbar();
 
             // Register NotesTab view type first
             this.registerView(
@@ -399,6 +426,7 @@ export default class HighlightrPlugin extends Plugin {
             // Register for view changes
             this.registerEvent(
                 this.app.workspace.on("active-leaf-change", (leaf) => {
+                    this.hideSelectionToolbar();
                     const activeMarkdownFilePath = leaf?.view instanceof MarkdownView
                         ? leaf.view.file?.path ?? null
                         : null;
@@ -426,6 +454,7 @@ export default class HighlightrPlugin extends Plugin {
 
             this.registerEvent(
                 this.app.workspace.on("file-open", async (file) => {
+                    this.hideSelectionToolbar();
                     const activeMarkdownFilePath = file?.extension === "md"
                         ? file.path
                         : null;
@@ -457,7 +486,7 @@ export default class HighlightrPlugin extends Plugin {
 
             this.addCommand({
                 id: "highlighter-plugin-menu",
-                name: "Open Highlightr",
+                name: t("command.openHighlighter"),
                 icon: "highlightr-pen",
                 editorCallback: (editor: Editor) => {
                     showHighlightrMenuFromCommand(this, editor as EnhancedEditor);
@@ -598,7 +627,7 @@ const colorValue = this.settings.highlighters[highlighterKey];
 
             this.addCommand({
                 id: "unhighlight",
-                name: "Remove highlight",
+                name: t("command.removeHighlight"),
                 icon: "highlightr-eraser",
                 editorCallback: async (editor: Editor) => {
                     this.eraseHighlight(editor);
@@ -646,6 +675,519 @@ const colorValue = this.settings.highlighters[highlighterKey];
         if (this.readingContextMenuHandlerBound) {
             this.app.workspace.containerEl.removeEventListener('contextmenu', this.readingContextMenuHandlerBound, true);
         }
+        if (this.toolbarMouseUpBound) {
+            this.app.workspace.containerEl.removeEventListener('mouseup', this.toolbarMouseUpBound);
+        }
+        this.hideSelectionToolbar();
+    }
+
+    private initializeSelectionToolbar(): void {
+        this.toolbar = new SelectionToolbar(() => this.settings);
+        this.toolbar.setHandlers({
+            onPickColor: (highlighter) => {
+                if (this.editorToolbarState) {
+                    this.performEditorToolbarAction("color", highlighter);
+                } else if (this.readingToolbarState) {
+                    void this.performReadingToolbarAction("color", highlighter);
+                }
+            },
+            onErase: () => {
+                if (this.editorToolbarState) {
+                    this.performEditorToolbarAction("erase");
+                } else if (this.readingToolbarState) {
+                    void this.performReadingToolbarAction("erase");
+                }
+            },
+            onAnnotate: () => {
+                if (this.editorToolbarState) {
+                    this.performEditorToolbarAction("annotate");
+                } else if (this.readingToolbarState) {
+                    void this.performReadingToolbarAction("annotate");
+                }
+            },
+            onPickStyle: this.handleToolbarPickStyle,
+        });
+        this.registerDomEvent(window, "keyup", this.editorKeyUpBound);
+    }
+
+    private handleToolbarPickStyle = (style: string) => {
+        this.settings.highlighterStyle = style;
+        void this.saveSettings();
+        this.refresh();
+    };
+
+    private hideSelectionToolbar(): void {
+        this.editorToolbarState = null;
+        this.readingToolbarState = null;
+        this.toolbar?.hide();
+    }
+
+    // Show the mini toolbar after the mouse released a text selection.
+    private toolbarMouseUpBound = (event: MouseEvent) => {
+        window.setTimeout(() => this.maybeShowSelectionToolbar(event), 10);
+    };
+
+    private maybeShowSelectionToolbar(event: MouseEvent): void {
+        if (event.button !== 0) {
+            return;
+        }
+        if (!this.toolbar) {
+            return;
+        }
+        if (this.toolbar.isVisible() && this.toolbar.contains(event.target as Node | null)) {
+            return;
+        }
+        const target = event.target as HTMLElement | null;
+        if (!target || typeof target.closest !== "function") {
+            return;
+        }
+        const leaf = target.closest(".workspace-leaf");
+        if (!leaf || !leaf.classList.contains("mod-active")) {
+            return;
+        }
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!view || !view.leaf) {
+            return;
+        }
+        const viewLeafEl = (view.leaf as unknown as { containerEl?: Element }).containerEl;
+        if (!viewLeafEl || viewLeafEl !== leaf) {
+            return;
+        }
+        if (target.closest(".markdown-source-view .cm-editor")) {
+            this.showToolbarForEditorSelection(view);
+        } else if (target.closest(".markdown-preview-view")) {
+            this.showToolbarForReadingSelection(view, target);
+        }
+    }
+
+    // Show the toolbar after a keyboard-driven selection (e.g. Shift + Arrow).
+    private editorKeyUpBound = (event: KeyboardEvent) => {
+        if (event.ctrlKey || event.metaKey || event.altKey) {
+            return;
+        }
+        const navKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"];
+        if (navKeys.indexOf(event.key) === -1) {
+            return;
+        }
+        const activeDoc = this.getActiveDocument();
+        const activeElement = activeDoc.activeElement;
+        if (!activeElement || typeof activeElement.closest !== "function") {
+            return;
+        }
+        if (!activeElement.closest(".workspace-leaf.mod-active .cm-editor")) {
+            return;
+        }
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!view) {
+            return;
+        }
+        window.setTimeout(() => {
+            if (this.app.workspace.getActiveViewOfType(MarkdownView) === view) {
+                this.showToolbarForEditorSelection(view);
+            }
+        }, 0);
+    };
+
+    private showToolbarForEditorSelection(view: MarkdownView): void {
+        const editor = view.editor as EnhancedEditor;
+        const selectionText = editor.getSelection();
+        if (!selectionText || !selectionText.trim().length) {
+            return;
+        }
+        const state = resolveSelectionState(editor);
+        if (state.kind === "none") {
+            return;
+        }
+        const activeDoc = this.getActiveDocument();
+        const fromOffset = editor.posToOffset?.(state.from);
+        const toOffset = editor.posToOffset?.(state.to);
+        const cm = editor.cm;
+        const coordsFrom = fromOffset != null && cm?.coordsAtPos ? cm.coordsAtPos(fromOffset) : null;
+        const coordsTo = toOffset != null && cm?.coordsAtPos ? cm.coordsAtPos(toOffset) : null;
+        if (!coordsFrom || !coordsTo) {
+            return;
+        }
+        const left = Math.min(coordsFrom.left, coordsTo.left);
+        const right = Math.max(coordsFrom.right, coordsTo.right);
+        const top = Math.min(coordsFrom.top, coordsTo.top);
+        const canErase = state.kind !== "plain" && !!state.parsed?.hasHighlight;
+        this.editorToolbarState = { view, editor, state };
+        this.readingToolbarState = null;
+        this.toolbar?.show({
+            doc: activeDoc,
+            x: (left + right) / 2,
+            y: top,
+            canErase,
+        });
+    }
+
+    private showToolbarForReadingSelection(view: MarkdownView, target: HTMLElement): void {
+        const activeDoc = this.getActiveDocument();
+        const previewRoot = target.closest(".markdown-preview-view") as HTMLElement | null;
+        const win = activeDoc.defaultView;
+        if (!previewRoot || !win) {
+            return;
+        }
+        const domSelection = win.getSelection();
+        if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
+            return;
+        }
+        const selectionText = domSelection.toString();
+        if (!selectionText || !selectionText.trim().length) {
+            return;
+        }
+        const range = domSelection.getRangeAt(0);
+        const sizer = previewRoot.querySelector(".markdown-preview-sizer") ?? previewRoot;
+        if (!sizer.contains(range.startContainer) || !sizer.contains(range.endContainer)) {
+            return;
+        }
+        const rect = range.getBoundingClientRect();
+        if (!rect || rect.width === 0) {
+            return;
+        }
+        const markEl = this.findReadingSelectionMark(previewRoot, range);
+        const canErase = markEl ? this.hasPluginHighlightMark(markEl) : false;
+        const approxOffset = this.computeReadingCharOffset(sizer, range);
+        this.readingToolbarState = {
+            view,
+            selectionText,
+            markEl,
+            approxOffset,
+        };
+        this.editorToolbarState = null;
+        this.toolbar?.show({
+            doc: activeDoc,
+            x: rect.left + rect.width / 2,
+            y: rect.top,
+            canErase,
+        });
+    }
+
+    private findReadingSelectionMark(previewRoot: HTMLElement, range: Range): HTMLElement | null {
+        const startContainer = range.startContainer;
+        const endContainer = range.endContainer;
+        const startEl = startContainer.nodeType === 1
+            ? (startContainer as Element)
+            : (startContainer.parentElement as Element | null);
+        const endEl = endContainer.nodeType === 1
+            ? (endContainer as Element)
+            : (endContainer.parentElement as Element | null);
+        const startMark = startEl ? startEl.closest("mark") : null;
+        const endMark = endEl ? endEl.closest("mark") : null;
+        if (startMark && startMark === endMark && previewRoot.contains(startMark)) {
+            return startMark as HTMLElement;
+        }
+        const common = range.commonAncestorContainer;
+        if (common.nodeType === 1 && (common as Element).tagName.toLowerCase() === "mark" && previewRoot.contains(common)) {
+            return common as HTMLElement;
+        }
+        return null;
+    }
+
+    private hasPluginHighlightMark(markEl: HTMLElement): boolean {
+        if (markEl.hasAttribute("style")) {
+            return true;
+        }
+        const cls = markEl.getAttribute("class") ?? "";
+        return cls.split(/\s+/).some((token) => token.startsWith("hltr-"));
+    }
+
+    // Approximate the character offset of the DOM selection inside the
+    // rendered preview text; used only to tie-break duplicate text matches.
+    private computeReadingCharOffset(root: Element, range: Range): number {
+        let count = 0;
+        const walker = root.ownerDocument?.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        if (!walker) {
+            return 0;
+        }
+        let node: Node | null;
+        while ((node = walker.nextNode()) !== null) {
+            if (node === range.startContainer) {
+                count += range.startOffset;
+                break;
+            }
+            count += (node.textContent ?? "").length;
+        }
+        return count;
+    }
+
+    private performEditorToolbarAction(
+        kind: "color" | "erase" | "annotate",
+        highlighter?: string,
+    ): void {
+        const snapshot = this.editorToolbarState;
+        if (!snapshot) {
+            return;
+        }
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView || activeView !== snapshot.view) {
+            this.hideSelectionToolbar();
+            return;
+        }
+        const { editor, state } = snapshot;
+        editor.focus();
+        this.hideSelectionToolbar();
+        if (state.kind === "none") {
+            return;
+        }
+        const settings = this.settings;
+        const finalize = () => {
+            this.suppressFullPostProcessing(450);
+            this.syncDecorationsNearSelection(editor);
+        };
+
+        if (state.kind !== "plain" && state.markRange && state.parsed) {
+            if (kind === "color" && highlighter) {
+                applyHighlightToMark(editor, state.markRange, state.parsed, highlighter, settings.highlighters[highlighter], settings, finalize);
+            } else if (kind === "erase") {
+                eraseHighlightRange(editor, state.markRange, state.parsed, finalize);
+            } else if (kind === "annotate") {
+                void annotateExistingMark(this.app, editor, state.markRange, state.parsed, false, finalize);
+            }
+            if (kind !== "annotate") {
+                this.moveCaretOutsideHighlight(editor, state.from.line, state.to.line);
+            }
+            return;
+        }
+
+        const range = { from: state.from, to: state.to };
+        if (kind === "color" && highlighter) {
+            applyHighlightToSelection(editor, range, highlighter, settings.highlighters[highlighter], settings, finalize);
+            this.moveCaretOutsideHighlight(editor, state.from.line, state.to.line);
+        } else if (kind === "annotate") {
+            void annotatePlainSelection(this.app, editor, range, finalize);
+        }
+    }
+
+    /**
+     * Obsidian's Live Preview only renders an inline <mark> block once the
+     * caret leaves it. Park the caret on the adjacent line briefly to force the
+     * render, then bring it back so the user's cursor doesn't end up elsewhere.
+     */
+    private moveCaretOutsideHighlight(editor: EnhancedEditor, fromLine: number, toLine: number): void {
+        const endPos = editor.getCursor("to");
+        const lastLine = editor.lastLine();
+        let targetLine = toLine + 1;
+        if (targetLine > lastLine) {
+            targetLine = fromLine - 1;
+        }
+        if (targetLine < 0) {
+            targetLine = toLine;
+        }
+        const lineLen = editor.getLine(targetLine).length;
+        editor.setCursor({ line: targetLine, ch: lineLen });
+        editor.focus();
+        const cm = editor.cm as unknown as { requestMeasure?: () => void; focus?: () => void } | undefined;
+        if (cm && typeof cm.requestMeasure === "function") {
+            cm.requestMeasure();
+        }
+        (this.app.workspace as unknown as { trigger: (name: string) => void }).trigger("layout-change");
+
+        // Make sure the Highlights & Notes sidebar refreshes right away.
+        this.triggerNotesTabUpdate(this.getFocusedMarkdownFilePath() ?? undefined);
+
+        // Leave long enough for Obsidian's deferred re-render to commit, then
+        // bring the caret back to the end of the highlighted block.
+        window.setTimeout(() => {
+            editor.setCursor(endPos);
+            editor.focus();
+        }, 200);
+    }
+
+    /**
+     * Deletes (unwraps) a highlight from the note matching the given sidebar
+     * record, keeping the surrounding text intact and refreshing the editor
+     * (Live Preview) as well as the Highlights & Notes panel.
+     */
+    public deleteHighlightByCriteria(criteria: {
+        text: string;
+        note: string | null;
+        tags: string[];
+        color: string | null;
+        cssClass: string | null;
+        filePath: string;
+    }): void {
+        const view = this.findMarkdownViewForPath(criteria.filePath);
+        const editor = view?.editor as EnhancedEditor | undefined;
+        if (!view || !editor) {
+            new Notice(t("sidebar.unfocused"));
+            return;
+        }
+        const match = this.findHighlightMatch(editor, criteria);
+        if (!match) {
+            new Notice(t("sidebar.notFound"));
+            return;
+        }
+        editor.setSelection(match.from, match.to);
+        editor.replaceSelection(match.inner);
+        this.suppressFullPostProcessing(450);
+        this.syncDecorationsNearSelection(editor);
+        this.moveCaretOutsideHighlight(editor, match.from.line, match.to.line);
+    }
+
+    /**
+     * Jumps to (focuses and selects) the highlight matching a sidebar record.
+     */
+    public jumpToHighlightByCriteria(criteria: {
+        text: string;
+        note: string | null;
+        tags: string[];
+        color: string | null;
+        cssClass: string | null;
+        filePath: string;
+    }): void {
+        const view = this.findMarkdownViewForPath(criteria.filePath);
+        const editor = view?.editor as EnhancedEditor | undefined;
+        if (!view || !editor) {
+            new Notice(t("sidebar.unfocused"));
+            return;
+        }
+        const match = this.findHighlightMatch(editor, criteria);
+        if (!match) {
+            new Notice(t("sidebar.notFound"));
+            return;
+        }
+        this.app.workspace.revealLeaf(view.leaf);
+        editor.focus();
+        editor.setSelection(match.from, match.to);
+        editor.scrollIntoView({ from: match.from, to: match.to }, true);
+    }
+
+    private findMarkdownViewForPath(filePath: string): MarkdownView | null {
+        const leaves = this.app.workspace.getLeavesOfType("markdown");
+        for (const leaf of leaves) {
+            const view = leaf.view;
+            if (view instanceof MarkdownView && view.file?.path === filePath) {
+                return view;
+            }
+        }
+        return null;
+    }
+
+    private findHighlightMatch(
+        editor: EnhancedEditor,
+        criteria: { text: string; note: string | null },
+    ): { from: { line: number; ch: number }; to: { line: number; ch: number }; inner: string } | null {
+        const content = editor.getValue();
+        const regex = /<mark\b([^>]*)>([\s\S]*?)<\/mark>/g;
+        let match: RegExpExecArray | null;
+        let best: { from: { line: number; ch: number }; to: { line: number; ch: number }; inner: string; score: number } | null = null;
+        while ((match = regex.exec(content)) !== null) {
+            const attributes = match[1] ?? "";
+            const inner = match[2] ?? "";
+            if (inner.trim() !== criteria.text.trim()) {
+                continue;
+            }
+            const note = getAttribute(attributes, "data-note") ?? "";
+            let score = 0;
+            if (criteria.note != null) {
+                if (note === criteria.note) {
+                    score += 3;
+                } else {
+                    continue;
+                }
+            }
+            const candidate = {
+                from: editor.offsetToPos(match.index),
+                to: editor.offsetToPos(match.index + match[0].length),
+                inner,
+                score,
+            };
+            if (!best || candidate.score > best.score) {
+                best = candidate;
+            }
+        }
+        return best ? { from: best.from, to: best.to, inner: best.inner } : null;
+    }
+
+    private async performReadingToolbarAction(
+        kind: "color" | "erase" | "annotate",
+        highlighter?: string,
+    ): Promise<void> {
+        const snapshot = this.readingToolbarState;
+        if (!snapshot) {
+            return;
+        }
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView || activeView !== snapshot.view) {
+            this.hideSelectionToolbar();
+            return;
+        }
+        const view = snapshot.view;
+        this.hideSelectionToolbar();
+        const wasPreview = view.getMode() === "preview";
+
+        try {
+            if (view.getMode() !== "source") {
+                await this.setMarkdownViewMode(view, "source");
+            }
+        } catch (error) {
+            console.error("Highlightr: could not switch to source mode", error);
+            this.restorePreviewIfNeeded(view, wasPreview);
+            return;
+        }
+
+        const editor = view.editor as EnhancedEditor;
+        let resolved: { from: { line: number; ch: number }; to: { line: number; ch: number } } | null = null;
+        if (snapshot.markEl) {
+            resolved = this.findMarkRangeFromPreviewElement(editor, snapshot.markEl, snapshot.approxOffset);
+        } else {
+            resolved = this.findNearestRangeByText(editor, snapshot.selectionText, snapshot.approxOffset);
+        }
+        if (!resolved) {
+            this.restorePreviewIfNeeded(view, wasPreview);
+            return;
+        }
+
+        editor.setSelection(resolved.from, resolved.to);
+        const state = resolveSelectionState(editor);
+        if (state.kind === "none") {
+            this.restorePreviewIfNeeded(view, wasPreview);
+            return;
+        }
+
+        const settings = this.settings;
+        const finalize = () => {
+            this.suppressFullPostProcessing(450);
+            this.syncDecorationsNearSelection(editor);
+        };
+        const applyEdit = (): Promise<void> | void => {
+            if (state.kind !== "plain" && state.markRange && state.parsed) {
+                if (kind === "color" && highlighter) {
+                    applyHighlightToMark(editor, state.markRange, state.parsed, highlighter, settings.highlighters[highlighter], settings, finalize);
+                    return;
+                }
+                if (kind === "erase") {
+                    eraseHighlightRange(editor, state.markRange, state.parsed, finalize);
+                    return;
+                }
+                if (kind === "annotate") {
+                    return annotateExistingMark(this.app, editor, state.markRange, state.parsed, false, finalize);
+                }
+                return;
+            }
+            const range = { from: state.from, to: state.to };
+            if (kind === "color" && highlighter) {
+                applyHighlightToSelection(editor, range, highlighter, settings.highlighters[highlighter], settings, finalize);
+            } else if (kind === "annotate") {
+                return annotatePlainSelection(this.app, editor, range, finalize);
+            }
+        };
+
+        try {
+            await applyEdit();
+        } catch (error) {
+            console.error("Highlightr: toolbar action failed", error);
+        }
+
+        window.setTimeout(() => this.restorePreviewIfNeeded(view, wasPreview), 40);
+    }
+
+    private restorePreviewIfNeeded(view: MarkdownView, wasPreview: boolean): void {
+        if (wasPreview) {
+            this.restorePreviewWhenAnnotationModalCloses(view);
+        }
+        window.setTimeout(() => this.attachEventListeners(), 0);
     }
 
     handleHighlighterInContextMenu = (
@@ -663,6 +1205,7 @@ const colorValue = this.settings.highlighters[highlighterKey];
         this.settings.highlighterOrder = this.settings.highlighterOrder || [];
         this.settings.conflictScanScope = this.settings.conflictScanScope || "active-file";
         this.settings.conflictScanFolder = this.settings.conflictScanFolder || "";
+        this.settings.highlighterLanguage = this.settings.highlighterLanguage || "auto";
 
         const knownHighlighters = Array.from(new Set([
             ...Object.keys(this.settings.highlighters),
@@ -750,6 +1293,9 @@ const colorValue = this.settings.highlighters[highlighterKey];
         if (this.readingContextMenuHandlerBound) {
             workspaceEl.removeEventListener('contextmenu', this.readingContextMenuHandlerBound, true);
         }
+        if (this.toolbarMouseUpBound) {
+            workspaceEl.removeEventListener('mouseup', this.toolbarMouseUpBound);
+        }
 
         // Create new bound handler
         this.clickHandlerBound = (e: MouseEvent) => {
@@ -767,6 +1313,7 @@ const colorValue = this.settings.highlighters[highlighterKey];
 
         workspaceEl.addEventListener('click', this.clickHandlerBound);
         workspaceEl.addEventListener('contextmenu', this.readingContextMenuHandlerBound, true);
+        workspaceEl.addEventListener('mouseup', this.toolbarMouseUpBound);
 
         // Handle editing mode
         const activeDoc = this.getActiveDocument();
