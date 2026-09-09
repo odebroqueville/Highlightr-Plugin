@@ -14,6 +14,7 @@ import Pickr from "@simonwep/pickr";
 import Sortable from "sortablejs";
 import { HIGHLIGHTER_METHODS, HIGHLIGHTER_STYLES, createDefaultHighlighterClass } from "./settingsData";
 import { setAttributes } from "../utils/setAttributes";
+import { getResolvedLang, setLanguage, t, type Language } from "../i18n";
 
 class DeleteHighlighterModal extends Modal {
   private readonly onSubmit: (confirmed: boolean) => void;
@@ -28,19 +29,19 @@ class DeleteHighlighterModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.createEl("p", {
-      text: "This action will permanently remove the highlight color. In the future, using the same color name for a new highlight color may create a conflict.",
+      text: t("settings.deleteModal.message"),
     });
     const controls = contentEl.createDiv();
     new Setting(controls)
       .addButton((button) => {
-        button.setButtonText("Cancel").onClick(() => {
+        button.setButtonText(t("modal.cancel")).onClick(() => {
           this.resolved = true;
           this.onSubmit(false);
           this.close();
         });
       })
       .addButton((button) => {
-        button.setButtonText("OK").setCta().onClick(() => {
+        button.setButtonText(t("modal.ok")).setCta().onClick(() => {
           this.resolved = true;
           this.onSubmit(true);
           this.close();
@@ -90,12 +91,16 @@ class HighlighterClassConflictModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.createEl("h3", { text: "Potential highlight class conflict" });
+    contentEl.createEl("h3", { text: t("settings.conflict.heading") });
     contentEl.createEl("p", {
-      text: `A highlight class conflict was found for ${this.colorName}: ${this.summary.classToken}.`,
+      text: t("settings.conflict.summary", { name: this.colorName, token: this.summary.classToken }),
     });
     contentEl.createEl("p", {
-      text: `Found ${this.summary.totalMarks} matching mark(s) in ${this.summary.fileCount} file(s). New color value: ${this.targetColorHex}.`,
+      text: t("settings.conflict.found", {
+        marks: this.summary.totalMarks,
+        files: this.summary.fileCount,
+        hex: this.targetColorHex,
+      }),
     });
 
     const colorsFound = Object.keys(this.summary.inlineColorCounts).map((color) => ({
@@ -110,7 +115,7 @@ class HighlighterClassConflictModal extends Modal {
     }
 
     if (this.summary.topFiles.length > 0) {
-      contentEl.createEl("p", { text: "Top impacted files:" });
+      contentEl.createEl("p", { text: t("settings.conflict.topFiles") });
       const fileDetails = contentEl.createEl("ul");
       this.summary.topFiles.forEach((entry) => {
         fileDetails.createEl("li", { text: `${entry.path} (${entry.marks})` });
@@ -118,27 +123,27 @@ class HighlighterClassConflictModal extends Modal {
     }
 
     contentEl.createEl("p", {
-      text: "Do you wish to overwrite highlight colors using the same name or choose a different highlight color name to keep both colors?",
+      text: t("settings.conflict.prompt"),
     });
 
     const controls = contentEl.createDiv();
     new Setting(controls)
       .addButton((button) => {
-        button.setButtonText("Choose different name").onClick(() => {
+        button.setButtonText(t("settings.conflict.buttonRename")).onClick(() => {
           this.resolved = true;
           this.onSubmit("rename");
           this.close();
         });
       })
       .addButton((button) => {
-        button.setButtonText("Reuse without migration").onClick(() => {
+        button.setButtonText(t("settings.conflict.buttonReuseNoMigrate")).onClick(() => {
           this.resolved = true;
           this.onSubmit("reuse-without-migration");
           this.close();
         });
       })
       .addButton((button) => {
-        button.setButtonText("Reuse and migrate").setCta().onClick(() => {
+        button.setButtonText(t("settings.conflict.buttonReuseMigrate")).setCta().onClick(() => {
           this.resolved = true;
           this.onSubmit("reuse-with-migration");
           this.close();
@@ -224,13 +229,13 @@ export class HighlightrSettingTab extends PluginSettingTab {
   private getConflictScanScopeLabel(): string {
     const scope = this.plugin.settings.conflictScanScope;
     if (scope === "active-file") {
-      return "active file";
+      return t("settings.scope.labelActiveFile");
     }
     if (scope === "folder") {
       const folder = this.plugin.settings.conflictScanFolder.trim();
-      return folder ? `folder: ${folder}` : "folder";
+      return folder ? t("settings.scope.labelFolderWith", { folder }) : t("settings.scope.labelFolder");
     }
-    return "entire vault";
+    return t("settings.scope.labelVault");
   }
 
   private async scanClassConflictSummary(classToken: string): Promise<ClassConflictSummary> {
@@ -347,7 +352,7 @@ export class HighlightrSettingTab extends PluginSettingTab {
     if (isActive) {
       await this.setHighlighterActivity(highlighter, false);
       this.removeHighlighterCommand(highlighter);
-      new Notice(`${highlighter} highlight moved to inactive`);
+      new Notice(t("settings.notice.movedToInactive", { name: highlighter }));
       this.display();
       return;
     }
@@ -366,7 +371,7 @@ export class HighlightrSettingTab extends PluginSettingTab {
     window.setTimeout(() => {
       dispatchEvent(new Event("Highlightr-NewCommand"));
     }, 100);
-    new Notice(`${highlighter} highlight permanently deleted`);
+    new Notice(t("settings.notice.permanentlyDeleted", { name: highlighter }));
     this.display();
   }
 
@@ -487,10 +492,10 @@ export class HighlightrSettingTab extends PluginSettingTab {
           button
             .setClass("HighlightrSettingsButton")
             .setIcon("highlightr-add")
-            .setTooltip("Reactivate")
+            .setTooltip(t("settings.buttons.reactivate"))
             .onClick(async () => {
               await this.setHighlighterActivity(highlighter, true);
-              new Notice(`${highlighter} highlight reactivated`);
+              new Notice(t("settings.notice.reactivated", { name: highlighter }));
               this.display();
             });
         });
@@ -502,7 +507,7 @@ export class HighlightrSettingTab extends PluginSettingTab {
           .setClass("HighlightrSettingsButton")
           .setClass("HighlightrSettingsButtonDelete")
           .setIcon("highlightr-delete")
-          .setTooltip("Remove")
+          .setTooltip(t("settings.buttons.remove"))
           .onClick(async () => {
             await this.handleDeleteHighlighter(highlighter, isActive);
           });
@@ -512,23 +517,55 @@ export class HighlightrSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    new Setting(containerEl).setName("Highlightr+ Plugin").setHeading();
-    const createdBy = containerEl.createEl("p", { text: "Created by " });
+    new Setting(containerEl).setName(t("settings.title")).setHeading();
+    const createdBy = containerEl.createEl("p", { text: t("settings.credits.createdBy") });
     createdBy.createEl("a", {
       text: "Chetachi 👩🏽‍💻",
       href: "https://github.com/chetachiezikeuzor",
     });
-    createdBy.createEl("span", { text: " and " });
+    createdBy.createEl("span", { text: t("settings.credits.and") });
     createdBy.createEl("a", {
       text: "Olivier 👨🏼‍💻",
       href: "https://github.com/bluelephant825",
     });
 
     new Setting(containerEl)
-      .setName("Choose highlight method")
-      .setDesc(
-        `Choose between highlighting with inline CSS or CSS classes. Please note that there are pros and cons to both choices. Inline CSS will keep you from being reliant on external CSS files if you choose to export your notes. CSS classes are more flexible and easier to customize.`
-      )
+      .setName(t("settings.language.name"))
+      .setDesc(t("settings.language.desc"))
+      .addButton((button) => {
+        button.setButtonText("中文");
+        if (getResolvedLang() === "zh") {
+          button.setCta();
+        }
+        button.onClick(async () => {
+          if (this.plugin.settings.highlighterLanguage === "zh") {
+            return;
+          }
+          this.plugin.settings.highlighterLanguage = "zh";
+          setLanguage("zh");
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      })
+      .addButton((button) => {
+        button.setButtonText("English");
+        if (getResolvedLang() === "en") {
+          button.setCta();
+        }
+        button.onClick(async () => {
+          if (this.plugin.settings.highlighterLanguage === "en") {
+            return;
+          }
+          this.plugin.settings.highlighterLanguage = "en";
+          setLanguage("en");
+          await this.plugin.saveSettings();
+          this.display();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName(t("settings.method.name"))
+      .setDesc(t("settings.method.desc"))
       .addDropdown((dropdown) => {
         let methods: Record<string, string> = {};
         HIGHLIGHTER_METHODS.map((method) => (methods[method] = method));
@@ -549,10 +586,8 @@ export class HighlightrSettingTab extends PluginSettingTab {
     const stylesSetting = new Setting(containerEl);
 
     stylesSetting
-      .setName("Choose highlight style")
-      .setDesc(
-        `Depending on your design aesthetic, you may want to customize the style of your highlights. Choose from an assortment of different highlighter styles by using the dropdown. Depending on your theme, this plugin's CSS may be overriden.`
-      )
+      .setName(t("settings.style.name"))
+      .setDesc(t("settings.style.desc"))
       .addDropdown((dropdown) => {
         let styles: Record<string, string> = {};
         HIGHLIGHTER_STYLES.map((style) => (styles[style] = style));
@@ -571,22 +606,22 @@ export class HighlightrSettingTab extends PluginSettingTab {
       const demo = createEl("p");
       demo.addClass("highlightr-style-demo");
 
-      const lowlight = createEl("span", { text: "Lowlight" });
+      const lowlight = createEl("span", { text: t("styleItems.lowlight") });
       lowlight.addClass("highlightr-style-demo-lowlight");
       demo.appendChild(lowlight);
       demo.appendChild(activeDocument.createTextNode(" "));
 
-      const floating = createEl("span", { text: "Floating" });
+      const floating = createEl("span", { text: t("styleItems.floating") });
       floating.addClass("highlightr-style-demo-floating");
       demo.appendChild(floating);
       demo.appendChild(activeDocument.createTextNode(" "));
 
-      const realistic = createEl("span", { text: "Realistic" });
+      const realistic = createEl("span", { text: t("styleItems.realistic") });
       realistic.addClass("highlightr-style-demo-realistic");
       demo.appendChild(realistic);
       demo.appendChild(activeDocument.createTextNode(" "));
 
-      const rounded = createEl("span", { text: "Rounded" });
+      const rounded = createEl("span", { text: t("styleItems.rounded") });
       rounded.addClass("highlightr-style-demo-rounded");
       demo.appendChild(rounded);
 
@@ -596,8 +631,8 @@ export class HighlightrSettingTab extends PluginSettingTab {
     stylesSetting.infoEl.appendChild(styleDemo());
 
     new Setting(containerEl)
-      .setName("Focus Highlights & Notes")
-      .setDesc("Automatically open and focus the Highlights & Notes tab when a file with highlights is opened.")
+      .setName(t("settings.focus.name"))
+      .setDesc(t("settings.focus.desc"))
       .addToggle((toggle) => {
         toggle
           .setValue(this.plugin.settings.focusHighlightsAndNotes)
@@ -609,13 +644,13 @@ export class HighlightrSettingTab extends PluginSettingTab {
       });
 
     const vaultScanSetting = new Setting(containerEl)
-      .setName("Vault scan scope for conflict checks")
-      .setDesc("Controls which files are scanned when checking and migrating class conflicts. Narrower scope reduces path exposure.")
+      .setName(t("settings.scope.name"))
+      .setDesc(t("settings.scope.desc"))
       .addDropdown((dropdown) => {
         dropdown
-          .addOption("active-file", "Active file only")
-          .addOption("folder", "Specific folder")
-          .addOption("vault", "Entire vault")
+          .addOption("active-file", t("settings.scope.optionActiveFile"))
+          .addOption("folder", t("settings.scope.optionFolder"))
+          .addOption("vault", t("settings.scope.optionVault"))
           .setValue(this.plugin.settings.conflictScanScope)
           .onChange(async (value) => {
             this.plugin.settings.conflictScanScope = value as "active-file" | "folder" | "vault";
@@ -649,37 +684,7 @@ export class HighlightrSettingTab extends PluginSettingTab {
     vaultScanInfoIcon.appendChild(vaultScanInfoPath2);
     vaultScanInfo.appendChild(vaultScanInfoIcon);
     const vaultScanInfoBubble = vaultScanInfo.createEl("div", { cls: "hltr-vault-scan-info-bubble" });
-    const infoMarkdown = `Think of this setting like a **digital security guard** for your Obsidian notes.
-
-When you install a plugin that alters how things look or work (like changing styles or managing "classes"), it needs to look through your files to make sure its instructions don't smash into another plugin's instructions. That's a **conflict check**.
-
-Here is exactly what that setting means, broken down into plain English:
-
-## 1. Vault Scan Scope
-
-* **The Vault:** This is your entire Obsidian project—the main folder where all your notes, images, and folders live.
-* **The Scope:** This just means the boundary line. Changing the scope tells the plugin: "You are only allowed to look inside this specific folder," instead of letting it wander through your whole vault.
-
-## 2. Class Conflicts
-
-In web development and plugins, a **class** is like a label you put on a note or a piece of text to give it special powers or styles (for example, a class called important-note might make the background glowing red).
-
-If two different plugins try to use the exact same class name for completely different things, Obsidian gets confused. This setting controls how far the plugin searches to find and fix (migrate) those identical, conflicting labels.
-
-## 3. Path Exposure (The Privacy Part)
-
-This is the most important part of the sentence. Every file on your computer has a "path" (like Documents/School/ObsidianVault/SecretDiary.md).
-
-If you give a plugin a wide scope (letting it scan everything), it has to read the file paths of every single note you own to do its job. If you give it a narrower scope (restricting it to just one folder), it never sees the names or paths of your other private files. It keeps your vault's structure private.
-
----
-
-### Summary Table
-
-| Scope Setting | What it does | Pros | Cons |
-| --- | --- | --- | --- |
-| **Wide / Full Vault** | Scans every single note you have. | Catches 100% of conflicts everywhere. | The plugin sees all your file names/paths. |
-| **Narrow / Restricted** | Only scans a specific folder. | High privacy; super fast scanning. | Might miss a conflict hidden in an un-scanned folder. |`;
+    const infoMarkdown = t("settings.scope.infoMarkdown");
     vaultScanInfoBubble.empty();
     void MarkdownRenderer.renderMarkdown(infoMarkdown, vaultScanInfoBubble, "", this.plugin);
 
@@ -717,8 +722,8 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
 
     if (this.plugin.settings.conflictScanScope === "folder") {
       new Setting(containerEl)
-        .setName("Conflict scan folder")
-        .setDesc("Folder path relative to vault root used for conflict scan/migration.")
+        .setName(t("settings.scopeFolder.name"))
+        .setDesc(t("settings.scopeFolder.desc"))
         .addText((text) => {
           text
             .setPlaceholder("e.g. Projects/Research")
@@ -731,28 +736,26 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
     }
 
     new Setting(containerEl)
-      .setName("Privacy note")
-      .setDesc("Conflict checks can scan note paths in the selected scope. Highlightr+ performs scans only on explicit save/migrate action and does not persist or transmit scanned file path lists.");
+      .setName(t("settings.privacy.name"))
+      .setDesc(t("settings.privacy.desc"));
 
     const highlighterSetting = new Setting(containerEl);
 
     highlighterSetting
-      .setName("Choose highlight colors")
+      .setName(t("settings.colors.name"))
       .setClass("highlighterplugin-setting-item")
-      .setDesc(
-        `Create new highlight colors by providing a color name and using the color picker to set the hex code value. Don't forget to save the color before exiting the color picker. Drag and drop the highlight color to change the order for your highlighter component.`
-      );
+      .setDesc(t("settings.colors.desc"));
 
     const colorInput = new TextComponent(highlighterSetting.controlEl);
-    colorInput.setPlaceholder("Color name");
+    colorInput.setPlaceholder(t("settings.colors.placeholderName"));
     colorInput.inputEl.addClass("highlighter-settings-color");
 
     const classInput = new TextComponent(highlighterSetting.controlEl);
-    classInput.setPlaceholder("Class name (optional)");
+    classInput.setPlaceholder(t("settings.colors.placeholderClass"));
     classInput.inputEl.addClass("highlighter-settings-class");
 
     const valueInput = new TextComponent(highlighterSetting.controlEl);
-    valueInput.setPlaceholder("Color hex code");
+    valueInput.setPlaceholder(t("settings.colors.placeholderHex"));
     valueInput.inputEl.addClass("highlighter-settings-value");
 
     highlighterSetting
@@ -841,7 +844,7 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
           .setClass("HighlightrSettingsButton")
           .setClass("HighlightrSettingsButtonAdd")
           .setIcon("highlightr-save")
-          .setTooltip("Save")
+          .setTooltip(t("settings.buttons.save"))
           .onClick(async (buttonEl: MouseEvent) => {
             let color = colorInput.inputEl.value.replace(" ", "-");
             let customClass = classInput.inputEl.value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-_]/g, "");
@@ -854,17 +857,17 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
                 const classToken = `hltr-${className.toLowerCase()}`;
                 if (this.plugin.settings.highlighterMethods === "css-classes") {
                    const summary = await this.scanClassConflictSummary(classToken);
-                   new Notice(`Conflict scan scope: ${this.getConflictScanScopeLabel()}`);
+                   new Notice(t("settings.notice.scope", { scope: this.getConflictScanScopeLabel() }));
                    if (summary.totalMarks > 0) {
 
                     const action = await this.confirmClassConflict(summary, color, value);
                     if (action === "rename") {
-                      new Notice("Choose a different highlight name or class to keep both colors.");
+                      new Notice(t("settings.notice.renameColor"));
                       return;
                     }
                     if (action === "reuse-with-migration") {
                       const migration = await this.migrateClassHighlights(classToken, value);
-                      new Notice(`Updated ${migration.updatedMarks} highlight(s) across ${migration.fileCount} file(s).`);
+                      new Notice(t("settings.notice.migrated", { marks: migration.updatedMarks, files: migration.fileCount }));
                     }
                   }
                 }
@@ -872,21 +875,21 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
                 return;
               }
               buttonEl.stopImmediatePropagation();
-              new Notice("This color already exists");
+              new Notice(t("settings.notice.colorExists"));
               return;
             }
             if (color && !value) {
-              new Notice("Highlighter hex code missing");
+              new Notice(t("settings.notice.missingHex"));
             } else if (!color && value) {
-              new Notice("Highlighter name missing");
+              new Notice(t("settings.notice.missingName"));
             } else {
-              new Notice("Highlighter values missing");
+              new Notice(t("settings.notice.missingValues"));
             }
           });
       });
 
     const activeHeader = new Setting(containerEl)
-      .setName("Active highlight colors")
+      .setName(t("settings.section.active"))
       .setHeading();
     activeHeader.setClass("highlightr-section-heading");
 
@@ -895,7 +898,7 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
     setIcon(activeInfoIcon, "info");
     const activeInfoBubble = activeInfo.createEl("div", {
       cls: "hltr-active-colors-info-bubble",
-      text: "Appear in the context menu and the command palette.",
+      text: t("settings.activeInfoBubble"),
     });
 
     let activeInfoHideTimer: number | null = null;
@@ -975,7 +978,7 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
     });
 
     const inactiveHeader = new Setting(containerEl)
-      .setName("Inactive highlight colors")
+      .setName(t("settings.section.inactive"))
       .setHeading();
     inactiveHeader.setClass("highlightr-section-heading");
 
@@ -996,7 +999,7 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
     );
     hltrDonationDiv.appendChild(donateText);
     const donateToChetachi = createEl("div");
-    new Setting(donateToChetachi).setName("Donate to Chetachi").setHeading();
+    new Setting(donateToChetachi).setName(t("settings.donate.chetachi")).setHeading();
     hltrDonationDiv.appendChild(donateToChetachi);
     hltrDonationDiv.appendChild(
       paypalButton("https://paypal.me/chelseaezikeuzor")
@@ -1007,7 +1010,7 @@ If you give a plugin a wide scope (letting it scan everything), it has to read t
     hltrDonationDiv.appendChild(kofiButton("https://ko-fi.com/chetachi"));
     const donateToOlivier = createEl("div");
     donateToOlivier.addClass("hltrDonationHeadingSpacing");
-    new Setting(donateToOlivier).setName("Donate to Olivier").setHeading();
+    new Setting(donateToOlivier).setName(t("settings.donate.olivier")).setHeading();
     hltrDonationDiv.appendChild(donateToOlivier);
     hltrDonationDiv.appendChild(
       paypalButton("https://paypal.me/odebroqueville")

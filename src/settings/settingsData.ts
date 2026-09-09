@@ -1,3 +1,5 @@
+import type { Language } from "../i18n";
+
 export const HIGHLIGHTER_STYLES = [
   "none",
   "lowlight",
@@ -32,6 +34,7 @@ export interface HighlightrSettings {
   highlighterStyle: string;
   focusHighlightsAndNotes: boolean;
   highlighterMethods: string;
+  highlighterLanguage: Language;
   highlighters: Highlighters;
   highlighterClasses: HighlighterClasses;
   highlighterActivity: HighlighterActivity;
@@ -44,16 +47,17 @@ const DEFAULT_SETTINGS: HighlightrSettings = {
   highlighterStyle: "none",
   focusHighlightsAndNotes: false,
   highlighterMethods: "inline-styles",
+  highlighterLanguage: "auto",
   highlighters: {
-    Pink: "#FFB8EBA6",
-    Red: "#FF5582A6",
-    Orange: "#FFB86CA6",
-    Yellow: "#FFF3A3A6",
-    Green: "#BBFABBA6",
-    Cyan: "#ABF7F7A6",
-    Blue: "#ADCCFFA6",
-    Purple: "#D2B3FFA6",
-    Grey: "#CACFD9A6",
+    Pink: "#FFB8EBE6",
+    Red: "#FF5582E6",
+    Orange: "#FFB86CE6",
+    Yellow: "#FFF3A3E6",
+    Green: "#BBFABBE6",
+    Cyan: "#ABF7F7E6",
+    Blue: "#ADCCFFE6",
+    Purple: "#D2B3FFE6",
+    Grey: "#CACFD9E6",
   },
   highlighterClasses: {},
   highlighterActivity: {},

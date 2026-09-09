@@ -1,6 +1,7 @@
-import { ItemView, WorkspaceLeaf, MarkdownView, TFile, setIcon } from "obsidian";
+import { ItemView, WorkspaceLeaf, MarkdownView, TFile, setIcon, Menu } from "obsidian";
 import HighlightrPlugin from "../plugin/main";
 import { EnhancedApp } from "../settings/types";
+import { t } from "../i18n";
 
 export const NOTES_VIEW_TYPE = "highlightr-notes-view";
 
@@ -8,6 +9,7 @@ export class NotesTab extends ItemView {
     plugin: HighlightrPlugin;
     private updateRequestId = 0;
     private activeFilePath: string | null = null;
+    private selectedHighlightEl: HTMLElement | null = null;
 
     public title = 'Highlights & Notes';
 
@@ -58,6 +60,7 @@ export class NotesTab extends ItemView {
         try {
             console.log("Starting updateNotesList");
             container.empty();
+            this.selectedHighlightEl = null;
 
             if (filePath) {
                 this.activeFilePath = filePath;
@@ -115,7 +118,7 @@ export class NotesTab extends ItemView {
                 const tagsRegex = /data-tags="([^"]*)"/;
                 const colorRegex = /(?:background(?:-color)?|--hltr-color):\s*((?:rgba?\([^)]+\)|#[A-Fa-f0-9]+))/i;
                 const classRegex = /\bclass="([^"]*)"/i;
-                const highlightRegex = /<mark[^>]*>(.*?)<\/mark>/g;
+                const highlightRegex = /<mark[^>]*>([\s\S]*?)<\/mark>/g;
 
                 let match;
                 while ((match = highlightRegex.exec(content)) !== null) {
@@ -363,6 +366,7 @@ export class NotesTab extends ItemView {
 
         fileHighlights.forEach(({ text, note, color, tags, cssClass }: { text: string; note: string | null; color: string | null; tags: string[]; filePath: string; cssClass: string | null }) => {
             const highlightEl = fileSection.createDiv({ cls: "highlight-item" });
+            highlightEl.tabIndex = 0;
 
             const textEl = highlightEl.createDiv({ cls: "highlight-text" });
             if (cssClass) {
@@ -405,6 +409,79 @@ export class NotesTab extends ItemView {
                     });
                 });
             }
+
+            // Left-click a record to select it in the list.
+            highlightEl.addEventListener("click", (event: MouseEvent) => {
+                const target = event.target as HTMLElement | null;
+                if (target && target.closest(".highlight-tag")) {
+                    return;
+                }
+                if (this.selectedHighlightEl) {
+                    this.selectedHighlightEl.classList.remove("is-selected");
+                }
+                this.selectedHighlightEl = highlightEl;
+                highlightEl.classList.add("is-selected");
+                highlightEl.focus();
+            });
+
+            // Pressing Delete / Backspace on a selected record deletes it.
+            highlightEl.addEventListener("keydown", (event: KeyboardEvent) => {
+                if (this.selectedHighlightEl !== highlightEl) {
+                    return;
+                }
+                if (event.key !== "Delete" && event.key !== "Backspace") {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                this.plugin.deleteHighlightByCriteria({
+                    text,
+                    note,
+                    tags,
+                    color,
+                    cssClass,
+                    filePath: sectionFilePath,
+                });
+            });
+
+            // Double-click a record to jump the editor caret to the highlight.
+            highlightEl.addEventListener("dblclick", (event: MouseEvent) => {
+                const target = event.target as HTMLElement | null;
+                if (target && target.closest(".highlight-tag")) {
+                    return;
+                }
+                this.plugin.jumpToHighlightByCriteria({
+                    text,
+                    note,
+                    tags,
+                    color,
+                    cssClass,
+                    filePath: sectionFilePath,
+                });
+            });
+
+            // Right-click a record to delete the corresponding highlight in
+            // the note (unwraps the <mark> and refreshes the editor + sidebar).
+            highlightEl.addEventListener("contextmenu", (event: MouseEvent) => {
+                event.preventDefault();
+                const menu = new Menu();
+                menu.addItem((item) => {
+                    item
+                        .setTitle(t("sidebar.deleteHighlight"))
+                        .setIcon("trash")
+                        .onClick(() => {
+                            this.plugin.deleteHighlightByCriteria({
+                                text,
+                                note,
+                                tags,
+                                color,
+                                cssClass,
+                                filePath: sectionFilePath,
+                            });
+                        });
+                });
+                menu.showAtMouseEvent(event);
+            });
         });
     }
 
